@@ -1,18 +1,12 @@
 from sm3 import sm3_hash, padding, IV
 import struct
 
+# 将哈希字符串转成初始向量格式
 def parse_hash(hash_str: str) -> list:
-    """将哈希字符串转换为初始向量格式"""
     return [int(hash_str[i:i+8], 16) for i in range(0, 64, 8)]
 
+# 长度扩展攻击函数
 def length_extension_attack(original_hash: str, original_len: int, append_data: bytes) -> tuple:
-    """
-    SM3长度扩展攻击
-    original_hash: 原始消息的哈希值
-    original_len: 原始消息长度(字节)
-    append_data: 要附加的数据
-    返回: (扩展消息的哈希, 扩展后的消息)
-    """
     # 解析原始哈希为初始向量
     initial_vector = parse_hash(original_hash)
     
@@ -29,8 +23,8 @@ def length_extension_attack(original_hash: str, original_len: int, append_data: 
     
     return forged_hash, extended_message
 
+# 验证长度扩展攻击
 def verify_length_extension():
-    """验证长度扩展攻击"""
     # 原始消息
     original_message = b"secret"
     original_len = len(original_message)

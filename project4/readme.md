@@ -1,4 +1,4 @@
-# SM3 密码杂凑算法实现与应用
+# SM3 算法的软件实现与优化
 
 本项目实现了SM3密码杂杂凑算法的基础功能、效率优化，以及基于SM3的长度扩展攻击验证和Merkle树构建（符合RFC6962规范）。
 
@@ -95,34 +95,4 @@ SM3算法的基础实现，用于验证算法正确性
 
 #### `test_merkle_tree() -> None`
 测试Merkle树功能，包括10w叶子节点的构建与两种证明的验证
-
-## 使用示例
-
-### 1. 计算SM3哈希
-```python
-from sm3 import sm3_hash_optimized
-
-message = b"Hello, SM3!"
-hash_result = sm3_hash_optimized(message)
-print(f"SM3哈希结果: {hash_result}")
-```
-
-### 2. 验证长度扩展攻击
-```python
-python length_extension_attack.py
-```
-
-### 3. 测试Merkle树
-```python
-python merkle_tree.py
-```
-
-## 实验结果
-### 1. 计算SM3哈希
-
-
-### 2. 验证长度扩展攻击
-
-
-### 3. 测试Merkle树
 

@@ -4,9 +4,43 @@ from cryptography.hazmat.primitives.asymmetric import x25519
 from cryptography.hazmat.primitives import serialization
 import numpy as np
 
-# 辅助函数：生成一个大素数（简化实现，实际应用中应使用更安全的素数生成）
+# 辅助函数：生成一个大素数（改进版，确保生成真正的素数）
 def generate_prime(bits=256):
-    return random.getrandbits(bits) | (1 << (bits - 1)) | 1
+    # 生成一个奇数
+    while True:
+        num = random.getrandbits(bits) | (1 << (bits - 1)) | 1
+        if is_prime(num):
+            return num
+
+# 简单的素性测试
+def is_prime(n, k=5):
+    if n <= 1:
+        return False
+    elif n <= 3:
+        return True
+    elif n % 2 == 0:
+        return False
+    
+    # 写成n-1 = d*2^s
+    d = n - 1
+    s = 0
+    while d % 2 == 0:
+        d //= 2
+        s += 1
+    
+    # 进行k次测试
+    for _ in range(k):
+        a = random.randint(2, min(n - 2, 1 << 20))
+        x = pow(a, d, n)
+        if x == 1 or x == n - 1:
+            continue
+        for __ in range(s - 1):
+            x = pow(x, 2, n)
+            if x == n - 1:
+                break
+        else:
+            return False
+    return True
 
 # 辅助函数：哈希函数，将元素映射到群G中的元素
 def hash_to_group(element, prime):
@@ -15,19 +49,41 @@ def hash_to_group(element, prime):
     hash_val = int.from_bytes(hash_obj.digest(), byteorder='big')
     return pow(hash_val, 2, prime)  # 确保结果在群中
 
-# 加法同态加密方案（简化版Paillier）
+# 加法同态加密方案（修复版Paillier）
 class AdditiveHomomorphicEncryption:
     def __init__(self, key_size=256):
-        self.p = generate_prime(key_size)
-        self.q = generate_prime(key_size)
+        # 确保p和q是不同的素数
+        while True:
+            self.p = generate_prime(key_size)
+            self.q = generate_prime(key_size)
+            if self.p != self.q:
+                break
+                
         self.n = self.p * self.q
         self.g = self.n + 1
-        self.lambda_ = (self.p - 1) * (self.q - 1)
-        self.mu = pow(self.lambda_, -1, self.n)  # 模n的逆元
+        # 使用lcm计算lambda而不是乘积，确保与n互质
+        self.lambda_ = self.lcm(self.p - 1, self.q - 1)
+        
+        # 确保lambda_与n互质，然后计算逆元
+        try:
+            self.mu = pow(self.lambda_, -1, self.n)  # 模n的逆元
+        except ValueError:
+            # 如果逆元计算失败，重新生成密钥
+            self.__init__(key_size)
         
         # 公钥和私钥
         self.public_key = (self.n, self.g)
         self.private_key = (self.lambda_, self.mu)
+    
+    # 计算最小公倍数
+    def lcm(self, a, b):
+        return a * b // self.gcd(a, b)
+    
+    # 计算最大公约数
+    def gcd(self, a, b):
+        while b:
+            a, b = b, a % b
+        return a
     
     def encrypt(self, m, public_key=None):
         if public_key is None:

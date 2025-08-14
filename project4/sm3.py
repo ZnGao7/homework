@@ -50,34 +50,38 @@ def padding(message: bytes) -> bytes:
     message += struct.pack('>Q', length)
     return message
 
-def message_extension(B: bytes) -> Tuple[List[int], List[int]]:
-    """消息扩展"""
-    # 将512bit分组转换为16个32bit字
-    W = list(struct.unpack('>16I', B))
+def message_extension(B):
+    # 确保B是bytes类型
+    if not isinstance(B, bytes):
+        raise TypeError("message_extension需要bytes类型的参数，而不是{}".format(type(B)))
     
-    # 扩展生成W[16..67]
+    W = list(struct.unpack('>16I', B))  # 将512bit分组转换为16个32bit字
+    
     for j in range(16, 68):
-        val = p1(W[j-16] ^ W[j-9] ^ rotl(W[j-3], 15)) ^ rotl(W[j-13], 7) ^ W[j-6]
-        W.append(val & 0xFFFFFFFF)
+        # 字扩展算法
+        Wj = p1(W[j-16] ^ W[j-9] ^ rotl(W[j-3], 15)) ^ rotl(W[j-13], 7) ^ W[j-6]
+        W.append(Wj)
     
-    # 生成W'[0..63]
-    W_prime = []
-    for j in range(64):
-        W_prime.append(W[j] ^ W[j+4])
-    
+    W_prime = [W[j] ^ W[j+4] for j in range(64)]
     return W, W_prime
 
-def compress_function(V: List[int], B: bytes) -> List[int]:
-    """压缩函数"""
-    A, B, C, D, E, F, G, H = V
+def compress_function(V, B):
+    # 确保B是bytes类型，如果不是则进行转换
+    if isinstance(B, int):
+        # 假设B是一个512位的整数，将其转换为bytes
+        B = B.to_bytes(64, byteorder='big')
+    elif not isinstance(B, bytes):
+        raise TypeError("compress_function的B参数需要是bytes或int类型，而不是{}".format(type(B)))
+    
     W, W_prime = message_extension(B)
+    A, B, C, D, E, F, G, H = V
     
     for j in range(64):
-        # 优化：减少临时变量，直接计算
-        SS1 = rotl((rotl(A, 12) + E + rotl(T[j], j % 32)) & 0xFFFFFFFF, 7)
+        # 64轮迭代压缩
+        SS1 = rotl((rotl(A, 12) + E + rotl(T[j], j % 32)) % 0x100000000, 7)
         SS2 = SS1 ^ rotl(A, 12)
-        TT1 = (ff_j(A, B, C, j) + D + SS2 + W_prime[j]) & 0xFFFFFFFF
-        TT2 = (gg_j(E, F, G, j) + H + SS1 + W[j]) & 0xFFFFFFFF
+        TT1 = (ff_j(j, A, B, C) + D + SS2 + W_prime[j]) % 0x100000000
+        TT2 = (gg_j(j, E, F, G) + H + SS1 + W[j]) % 0x100000000
         D = C
         C = rotl(B, 9)
         B = A
@@ -87,18 +91,18 @@ def compress_function(V: List[int], B: bytes) -> List[int]:
         F = E
         E = p0(TT2)
     
-    # 与初始值异或
     return [
-        (A ^ V[0]) & 0xFFFFFFFF,
-        (B ^ V[1]) & 0xFFFFFFFF,
-        (C ^ V[2]) & 0xFFFFFFFF,
-        (D ^ V[3]) & 0xFFFFFFFF,
-        (E ^ V[4]) & 0xFFFFFFFF,
-        (F ^ V[5]) & 0xFFFFFFFF,
-        (G ^ V[6]) & 0xFFFFFFFF,
-        (H ^ V[7]) & 0xFFFFFFFF
+        (A ^ V[0]) % 0x100000000,
+        (B ^ V[1]) % 0x100000000,
+        (C ^ V[2]) % 0x100000000,
+        (D ^ V[3]) % 0x100000000,
+        (E ^ V[4]) % 0x100000000,
+        (F ^ V[5]) % 0x100000000,
+        (G ^ V[6]) % 0x100000000,
+        (H ^ V[7]) % 0x100000000
     ]
-
+    
+    
 def sm3_hash(message: Union[str, bytes], initial_vector: List[int] = None) -> str:
     """计算SM3哈希值，支持自定义初始向量（用于长度扩展攻击）"""
     if isinstance(message, str):
@@ -139,3 +143,11 @@ def sm3_hash_optimized(message: Union[str, bytes], initial_vector: List[int] = N
             V = compress_function(V, B)
     
     return ''.join(f'{x:08x}' for x in V)
+
+
+# 测试 sm3
+if __name__ == "__main__":
+
+    message = b"Hello, SM3!"
+    hash_result = sm3_hash_optimized(message)
+    print(f"SM3哈希结果: {hash_result}")

@@ -1,196 +1,222 @@
-# SM4算法软件实现与优化
-
-本项目从基本实现出发，覆盖T-table、AESNI以及最新的指令集（GFNI、VPROLD等）以优化SM4的软件执行效率，同时实现了SM4-GCM认证加密工作模式。
+# SM4 的软件实现与优化
 
 
 
-## 实现版本
+## 一、SM4 分组密码算法
 
-1. **基础实现** (`sm4_basic.c`)
-   - 最简洁的SM4实现，包含完整的密钥扩展和加密/解密功能
 
-2. **T-table优化** (`sm4_Ttable.c`)
-   - 通过预计算T函数结果来减少实时计算量
+### 1. 密钥扩展
 
-3. **AESNI指令集优化** (`sm4_aesni.c`)
-   - 利用Intel AESNI加密指令集加速运算
+密钥扩展的作用是从128位主密钥生成32个32位的轮密钥，流程如下：
 
-4. **最新指令集优化** (`sm4_gfni.c`)
-   - 基于GFNI和VPROLD等最新指令集的高性能实现
+1. **初始密钥处理**：
+   - 将16字节（128位）主密钥分为4个32位字`MK[0]~MK[3]`
+   - 与固定参数`FK[0]~FK[3]`进行异或，得到初始密钥`K[0]~K[3]`
 
-5. **SM4-GCM工作模式** (`sm4_gcm.c`)
-   - 基于优化后的SM4实现GCM认证加密模式
+2. **轮密钥生成**（共32轮）：
+   - 对于第`i`轮（0≤i<32）：
+     ```
+     t = K[i+1] ^ K[i+2] ^ K[i+3] ^ CK[i]
+     ```
+     其中`CK[i]`是轮常量
+   - 对`t`的4个字节分别应用S盒替换
+   - 对替换结果进行循环移位和异或操作：
+     ```
+     t = t ^ (t << 13 | t >> 19) ^ (t << 23 | t >> 9)
+     ```
+   - 生成轮密钥：`K[i+4] = K[i] ^ t`
+   - 保存轮密钥`rk[i] = K[i+4]`
 
-## 函数说明
+### 2. 数据加密（单块）
 
-### 基础实现 (sm4_basic.c)
+SM4加密算法对16字节（128位）数据块进行加密，流程如下：
 
-```c
-// 密钥扩展函数：生成32轮轮密钥
-void sm4_key_expansion(const uint8_t *key, uint32_t rk[32]);
+1. **初始变换**：
+   - 将16字节输入数据分为4个32位字`X[0]~X[3]`
 
-// 加密函数：将16字节明文加密为16字节密文
-void sm4_encrypt(const uint8_t *key, const uint8_t *input, uint8_t *output);
+2. **轮变换**（共32轮）：
+   - 对于第`i`轮（0≤i<32）：
+     ```
+     X[i+4] = X[i] ^ T(X[i+1] ^ X[i+2] ^ X[i+3] ^ rk[i])
+     ```
+     其中`T`函数是SM4的核心变换
 
-// 解密函数：将16字节密文解密为16字节明文
-void sm4_decrypt(const uint8_t *key, const uint8_t *input, uint8_t *output);
-```
+3. **T函数实现**：
+   - 对输入的32位数据按字节拆分，每个字节分别应用S盒替换
+   - 对替换结果应用线性变换`L`：
+     ```
+     L(x) = x ^ (x << 2 | x >> 30) ^ (x << 10 | x >> 22) ^ 
+            (x << 18 | x >> 14) ^ (x << 24 | x >> 8)
+     ```
 
-### T-table优化 (sm4_t_table.c)
+4. **输出变换**：
+   - 最终输出为`X[35]、X[34]、X[33]、X[32]`（反序排列）
 
-```c
-// 初始化T-table：预计算T函数的所有可能结果
-void init_T_table();
 
-// 优化的加密函数：使用预计算的T-table
-void sm4_encrypt_opt(const uint8_t *key, const uint8_t *input, uint8_t *output);
-```
+## 二、GCM 工作模式
 
-### AESNI指令集优化 (sm4_aesni.c)
+GCM模式结合了CTR（计数器）模式的加密功能和GHASH函数的认证功能，流程分为加密和解密两部分。
 
-```c
-// 使用AESNI指令集的加密函数
-void sm4_encrypt_aesni(const uint8_t *key, const uint8_t *input, uint8_t *output);
-```
+### 1. 加密流程
 
-### 最新指令集优化 (sm4_gfni.c)
+1. **参数初始化**：
+   - 生成哈希密钥`H`：`H = SM4_encrypt(key, 0^128)`（全零块加密结果）
+   - 初始化计数器：将12字节IV扩展为16字节，格式为`IV || 0x00000001`
 
-```c
-// 使用GFNI和VPROLD等最新指令的加密函数
-void sm4_encrypt_advanced(const uint8_t *key, const uint8_t *input, uint8_t *output);
-```
+2. **生成认证基准值J0**：
+   - `J0 = SM4_encrypt(key, 初始计数器)`
 
-### SM4-GCM工作模式 (sm4_gcm.c)
+3. **CTR模式加密**：
+   - 计数器初始值加1，生成第一个加密计数器
+   - 对每个计数器值进行SM4加密，得到密钥流
+   - 明文与密钥流异或得到密文：`ciphertext = plaintext ^ keystream`
+   - 每次加密后计数器值加1，重复上述过程直至所有明文块处理完成
 
-```c
-// 初始化GCM上下文
-int sm4_gcm_init(sm4_gcm_ctx *ctx, const uint8_t *key, size_t key_len,
-                 const uint8_t *iv, size_t iv_len,
-                 const uint8_t *aad, size_t aad_len);
+4. **计算认证标签**：
+   - 使用GHASH函数计算AAD（附加认证数据）和密文的哈希值
+   - 标签生成：`tag = GHASH结果 ^ J0`（取前`tag_len`字节）
 
-// 处理附加认证数据
-void sm4_gcm_update_aad(sm4_gcm_ctx *ctx, const uint8_t *aad, size_t len);
 
-// 加密数据
-void sm4_gcm_encrypt(sm4_gcm_ctx *ctx, const uint8_t *plaintext, 
-                    uint8_t *ciphertext, size_t len);
+### 2. 解密流程
 
-// 解密数据
-void sm4_gcm_decrypt(sm4_gcm_ctx *ctx, const uint8_t *ciphertext, 
-                    uint8_t *plaintext, size_t len);
+1. **参数初始化**：与加密流程相同，生成`H`和`J0`
 
-// 完成GCM处理，生成认证标签
-void sm4_gcm_final(sm4_gcm_ctx *ctx, uint8_t *tag, size_t tag_len);
-```
+2. **验证标签**：
+   - 使用GHASH函数计算AAD和密文的哈希值
+   - 计算预期标签：`expected_tag = GHASH结果 ^ J0`
+   - 对比预期标签与输入标签，不匹配则解密失败
 
-## 算法优化流程
+3. **CTR模式解密**：
+   - 与加密流程使用相同的计数器序列生成密钥流
+   - 密文与密钥流异或得到明文：`plaintext = ciphertext ^ keystream`
 
-### 1. 基础实现优化
 
-SM4算法的核心是32轮迭代，每轮包含T函数变换，T函数由S盒字节替换和L线性变换组成：
+### 3. GHASH 函数
 
-```
-T(x) = L(S(x))
-```
+GHASH是基于伽罗瓦域（GF(2^128)）的哈希函数，流程如下：
 
-基础实现严格按照算法定义，逐字节进行S盒替换，然后进行线性变换。
+1. **初始化状态**：`state = 0^128`（全零块）
 
-### 2. T-table优化
+2. **处理AAD**：
+   - 将AAD按16字节块拆分，不足16字节的块用0填充
+   - 对每个块：`state = (state ^ block) * H`（伽罗瓦域乘法）
 
-T-table优化通过预计算所有可能输入的T函数结果，将实时计算转为查表操作：
+3. **处理密文**：
+   - 与AAD处理方式相同，将密文按16字节块拆分并处理
+   - 对每个块：`state = (state ^ block) * H`
 
-1. 预计算T_table[256][4]，存储所有可能字节值经过T变换的结果
-2. 将32位输入拆分为4个字节
-3. 分别查表后进行异或组合，得到T函数结果
+4. **处理长度信息**：
+   - 生成长度块：前8字节为AAD长度（位），后8字节为密文长度（位）
+   - 更新状态：`state = (state ^ 长度块) * H`
 
-这种方法用内存换取计算时间，减少了约70%的实时计算量。
+5. **输出结果**：`GHASH结果 = state`
 
-### 3. AESNI指令集优化
 
-AESNI指令集提供了128位并行操作能力，优化步骤包括：
+### 4. 伽罗瓦域乘法（GF(2^128)）
 
-1. 使用`_mm_shuffle_epi8`指令实现16字节并行S盒替换
-2. 使用`_mm_slli_epi32`和`_mm_xor_si128`等指令并行实现L线性变换
-3. 所有操作在128位寄存器中完成，减少内存访问
+伽罗瓦域乘法是GHASH函数的核心，实现如下：
 
-AESNI优化充分利用了硬件并行性，大幅提升处理效率。
+1. 初始化结果`p = 0^128`
+2. 对乘数`b`的每个比特位（从最高位到最低位）：
+   - 若当前比特位为1，则`p = p ^ a`（`a`为被乘数）
+   - 将`a`左移1位，若产生进位（最高位为1）：
+     - 则`a = a ^ 0x87000000000000000000000000000000`（不可约多项式）
+3. 最终结果`p`即为乘法结果
 
-### 4. GFNI/VPROLD指令集优化
 
-最新指令集提供了更强大的加密运算支持：
 
-1. 使用GFNI指令集中的`_mm_gf2p8affineinv_epi64_epi8`实现更高效的S盒替换
-2. 使用VPROLD指令集中的`_mm_rol_epi32`和`_mm_ror_epi32`优化移位操作
-3. 进一步提升指令级并行性，减少指令数量
 
-这些最新指令专为密码学运算设计，提供了比AESNI更高的性能。
+## 三. T-table查表优化
 
-### 5. SM4-GCM优化
+### 优化原理
 
-GCM模式优化重点在于伽罗瓦域乘法：
+T-table优化是通过预计算将SM4算法中的S盒替换和线性变换L的组合操作存储在表中，以空间换时间的优化方式：
 
-1. 使用64位变量实现高效的GF(2^128)乘法
-2. 结合SM4的优化实现，提高计数器模式加密效率
-3. 优化认证标签计算流程，减少冗余操作
+- SM4的T函数由S盒（非线性变换）和L函数（线性变换）组成：`T(x) = L(S(x))`
+- 预计算所有可能输入（0~2^32-1）对应的T函数输出值，存储在多维数组中
+- 实际加密时直接通过查表获取结果，避免实时计算
 
-## 使用方法
-
-### 基础加密解密
-
-```c
-uint8_t key[16] = {0}; // 16字节密钥
-uint8_t plaintext[16] = {0}; // 16字节明文
-uint8_t ciphertext[16]; // 存储密文
-uint8_t decrypted[16]; // 存储解密结果
-
-// 加密
-sm4_encrypt_advanced(key, plaintext, ciphertext);
-
-// 解密
-sm4_decrypt_advanced(key, ciphertext, decrypted);
-```
-
-### GCM模式使用
+### 实现方式
 
 ```c
-sm4_gcm_ctx ctx;
-uint8_t key[16] = {0};
-uint8_t iv[12] = {0}; // 推荐12字节IV
-uint8_t aad[...]; // 附加认证数据
-uint8_t plaintext[...]; // 明文
-uint8_t ciphertext[...]; // 密文
-uint8_t tag[16]; // 认证标签
+// 4维T表定义 (256×256×256×256)
+static uint32_t T_table[256][256][256][256];
 
-// 初始化
-sm4_gcm_init(&ctx, key, 16, iv, 12, aad, sizeof(aad));
+// 初始化T表
+static void sm4_init_T_table() {
+    for (int a = 0; a < 256; a++) {
+        for (int b = 0; b < 256; b++) {
+            for (int c = 0; c < 256; c++) {
+                for (int d = 0; d < 256; d++) {
+                    // 组合4个字节
+                    uint32_t val = (Sbox[a] << 24) | (Sbox[b] << 16) | 
+                                  (Sbox[c] << 8) | Sbox[d];
+                    // 预计算L变换结果
+                    T_table[a][b][c][d] = sm4_L(val);
+                }
+            }
+        }
+    }
+}
 
-// 加密
-sm4_gcm_encrypt(&ctx, plaintext, ciphertext, sizeof(plaintext));
-
-// 生成标签
-sm4_gcm_final(&ctx, tag, 16);
+// 优化的轮变换
+X[i+4] = X[i] ^ T_table[p0][p1][p2][p3];
 ```
 
-## 性能对比
 
-在支持GFNI指令集的现代处理器上，各版本性能对比（加密1GB数据）：
+## 四. AES-NI指令集优化
 
-| 实现版本 | 耗时(秒) | 相对性能 |
-|---------|---------|---------|
-| 基础实现 | 12.8 | 1x |
-| T-table优化 | 4.3 | 3x |
-| AESNI优化 | 1.6 | 8x |
-| GFNI/VPROLD优化 | 1.0 | 12.8x |
+### 优化原理
 
-注：实际性能可能因硬件平台和编译器优化而有所不同。
+AES-NI（Advanced Encryption Standard New Instructions）是Intel推出的针对AES算法的硬件加速指令集，虽然主要设计用于AES，但可通过映射实现SM4优化：
 
-## 编译说明
+- 利用`AESENC`（AES加密）指令模拟SM4的轮变换
+- 使用`AESKEYGENASSIST`指令辅助密钥扩展
+- 通过数据重排和掩码技术将SM4的S盒映射到AES-NI可处理的形式
 
-使用支持AVX2和GFNI指令集的编译器编译：
+### 实现方式
 
-```bash
-gcc -O3 -march=skylake -c sm4_basic.c sm4_t_table.c sm4_aesni.c sm4_gfni.c sm4_gcm.c
-gcc -o sm4_demo *.o
+```c
+// 使用AES-NI指令实现SM4轮变换
+static __m128i sm4_round_aesni(__m128i state, __m128i round_key) {
+    // 应用轮密钥
+    __m128i temp = _mm_xor_si128(state, round_key);
+    
+    // 使用AESENC指令模拟S盒和线性变换
+    temp = _mm_aesenc_si128(temp, _mm_setzero_si128());
+    
+    // 应用SM4特定的线性变换调整
+    return _mm_xor_si128(temp, _mm_shuffle_epi32(temp, 0x1b));
+}
 ```
 
-请根据目标平台选择合适的-march参数。
+
+
+## 五. GFNI指令集优化
+
+### 优化原理
+
+GFNI（Galois Field New Instructions）是Intel在Ice Lake架构中引入的新指令集，专门用于伽罗瓦域运算，可直接加速SM4的S盒变换：
+
+- `GF2P8AFFINEQB`指令直接实现GF(2^8)上的仿射变换，完美匹配SM4的S盒仿射部分
+- 结合预计算的S盒矩阵，单条指令即可完成SM4的S盒替换
+- 减少了数据依赖，提高流水线利用率
+
+### 实现方式
+
+```c
+// GFNI优化的S盒实现
+static __m128i sm4_sbox_gfni(__m128i x) {
+    // 加载S盒矩阵（16x16）
+    __m128i sbox = _mm_loadu_si128((const __m128i*)Sbox_gfni);
+    
+    // SM4仿射变换常数项
+    __m128i affine_const = _mm_setr_epi8(
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x87
+    );
+    
+    // 单条指令完成S盒替换
+    return _mm_gf2p8affineqb_epi64_epi8(x, sbox, affine_const);
+}
+```

@@ -3,20 +3,15 @@ import math
 from typing import List, Tuple, Optional
 
 class MerkleTree:
-    """基于SM3的Merkle树实现，遵循RFC6962规范"""
-    
+    # 初始化Merkle树，leaves 表示叶子节点数据列表
     def __init__(self, leaves: List[bytes]):
-        """
-        初始化Merkle树
-        leaves: 叶子节点数据列表
-        """
         self.leaves = leaves
         self.leaf_hashes = [sm3_hash_optimized(leaf) for leaf in leaves]
         self.tree = self.build_tree()
         self.root = self.tree[0][0] if self.tree else ""
     
+    # 构建Merkle树
     def build_tree(self) -> List[List[str]]:
-        """构建Merkle树"""
         if not self.leaf_hashes:
             return []
             
@@ -41,12 +36,8 @@ class MerkleTree:
         
         return tree
     
+    # 获取指定索引叶节点的存在性证明，返回证明路径
     def get_proof(self, index: int) -> List[Tuple[str, bool]]:
-        """
-        获取指定索引叶子节点的存在性证明
-        index: 叶子节点索引
-        返回: 证明路径列表，每个元素为(哈希值, 是否为左节点)
-        """
         if index < 0 or index >= len(self.leaves):
             return []
             
@@ -68,15 +59,8 @@ class MerkleTree:
         
         return proof
     
+    # 验证存在性证明
     def verify_proof(self, leaf: bytes, index: int, proof: List[Tuple[str, bool]], root: str) -> bool:
-        """
-        验证存在性证明
-        leaf: 叶子节点数据
-        index: 叶子节点索引
-        proof: 证明路径
-        root:  Merkle树根节点
-        返回: 验证结果
-        """
         current_hash = sm3_hash_optimized(leaf)
         
         for hash_val, is_left in proof:
@@ -89,12 +73,8 @@ class MerkleTree:
         
         return current_hash == root
     
+    # 获取不存在证明
     def get_non_existence_proof(self, value: bytes) -> Tuple[Optional[bytes], Optional[bytes], List[Tuple[str, bool]], List[Tuple[str, bool]]]:
-        """
-        获取不存在性证明
-        value: 要验证不存在的值
-        返回: (左相邻叶子, 右相邻叶子, 左叶子证明, 右叶子证明)
-        """
         # 对叶子进行排序（假设叶子可排序）
         sorted_leaves = sorted(self.leaves)
         n = len(sorted_leaves)
@@ -126,8 +106,8 @@ class MerkleTree:
         
         return (left_leaf, right_leaf, left_proof, right_proof)
 
+# 测试函数：生成10万个叶子节点并构建Merkle树
 def test_merkle_tree():
-    """测试Merkle树功能（10w叶子节点）"""
     print("生成10w个叶子节点...")
     # 生成10w个测试叶子节点
     num_leaves = 100000
